@@ -762,7 +762,6 @@ function renderDoc(){
 
   let body;
   if (inv){
-    const balance = Math.max(0, total - num(S.deposit));
     body = `
     <div class="meta">${client}
       <div class="card mint"><div class="lbl">Issued</div><div class="val">${fmtDate(S.date)}</div></div>
@@ -776,7 +775,6 @@ function renderDoc(){
       <div class="totals">${extra}
         <div class="l grand"><span>Total</span><span>${money(total)}</span></div>
         ${num(S.deposit) ? lines([["Deposit received", money(num(S.deposit))]]) : ""}
-        <div class="l due ${balance === 0 ? "zero" : ""}"><span>${balance === 0 ? "Fully paid" : "Balance due"}</span><span>${money(balance)}</span></div>
       </div>
     </div>`;
   } else {
@@ -798,7 +796,6 @@ function renderDoc(){
         <div class="l grand"><span>Order total</span><span>${money(total)}</span></div>
         ${before ? lines([["Paid before", money(before)]]) : ""}
         ${lines([["Paid today", money(paid)]])}
-        <div class="l due ${full ? "zero" : ""}"><span>${full ? "Nothing left to pay" : "Left to pay"}</span><span>${money(left)}</span></div>
       </div>
     </div>`;
   }
