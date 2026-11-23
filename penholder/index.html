@@ -79,12 +79,17 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
       <div class="section">
         <div class="label">Name</div>
         <input type="text" id="name" value="SOFIA" maxlength="16" aria-label="Name">
-        <div class="chips"><button type="button" class="chip" id="caps" aria-pressed="true">All capitals</button></div>
-        <p class="hint">Long names shrink on their own so the piece always fits the printer bed.</p>
+        <div class="chips"><button type="button" class="chip" id="caps" aria-pressed="true">All capitals</button><button type="button" class="chip" id="stretch" aria-pressed="true">Stretch letters</button></div>
+        <p class="hint">Long names shrink on their own so the piece always fits the printer bed. Stretch letters makes them taller, up to 2 cm below the rim.</p>
       </div>
       <div class="section">
         <div class="label">Letter height</div>
         <label class="slider"><input type="range" id="cap" min="30" max="50" step="1" value="44" aria-label="Letter height"><output id="capOut"></output></label>
+      </div>
+      <div class="section">
+        <div class="label">Box height</div>
+        <label class="slider"><input type="range" id="box" min="50" max="100" step="5" value="60" aria-label="Box height"><output id="boxOut"></output></label>
+        <p class="hint">Taller walls keep the pens more upright. 6 cm is our standard.</p>
       </div>
       <div class="section">
         <div class="label">Compartments</div>
@@ -1184,7 +1189,7 @@ const fromB64 = (s) => { const b = atob(s); const u = new Uint8Array(b.length); 
 // Units mm. X length, Y depth (letters face toward negative Y), Z up.
 const DEFAULTS = {
   cap: 44, track: -1, relief: 6, drop: 1.2, embed: 1.2, depth: 62, wall: 2, floor: 2,
-  radius: 7, divider: 1.6, compartments: 3, minLen: 120, maxLen: 224, minBox: 50, lip: 6,
+  radius: 7, divider: 1.6, compartments: 3, minLen: 120, maxLen: 224, minBox: 60, lip: 6, stretch: true, headroom: 20,
 };
 
 function flatten(cmds, scale) {
@@ -1269,9 +1274,12 @@ function build(W, font, opts) {
     const s = (o.maxLen - 8) / tw; cap *= s; shrunk = true;
     g = textShape(W, font, text, cap, o.track * s); tw = g.bounds().max[0];
   }
-  const letterH = g.bounds().max[1];
+  let letterH = g.bounds().max[1];
   const L = Math.max(tw + 8, o.minLen);
   const boxH = Math.max(letterH + o.lip, o.minBox);
+  // Stretch letters upward only (width unchanged) so they rise to 2 cm below the rim. Bevel is added after, so still 50 degrees.
+  let stretched = false;
+  if (o.stretch && letterH < boxH - o.headroom) { const f = (boxH - o.headroom) / letterH; g = g.scale([1, f]); letterH *= f; stretched = true; }
   g = g.translate([(L - tw) / 2, 0]);
   const letters = bevelLetters(W, g, o);
   const outer = roundedRect(W, 0, 0, L, o.depth, o.radius);
@@ -1285,7 +1293,7 @@ function build(W, font, opts) {
     divs.push(Manifold.cube([o.divider, o.depth - o.wall, boxH - 8]).translate([acc * L - o.divider / 2, o.wall / 2, 0]));
   }
   solid = Manifold.union([solid, letters, ...divs]);
-  return { solid, info: { length: L, depth: o.depth + o.relief, height: Math.max(boxH, letterH), cap, shrunk } };
+  return { solid, info: { length: L, depth: o.depth + o.relief, height: Math.max(boxH, letterH), cap, shrunk, letterH, stretched } };
 }
 
 // ---------- export ----------
@@ -1343,23 +1351,25 @@ function zipStore(files) {
 
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#F9A8B8', '#9FDCD6', '#C9B3F0', '#F6D27A', '#FFB38A', '#8FD3FF', '#C8F08F'];
-const st = { name: 'SOFIA', caps: true, cap: 44, compartments: 3, color: COLORS[0] };
-try { Object.assign(st, JSON.parse(localStorage.getItem('alfred-penholder-v1') || '{}')); } catch (e) {}
-const save = () => { try { localStorage.setItem('alfred-penholder-v1', JSON.stringify(st)); } catch (e) {} };
+const st = { name: 'SOFIA', caps: true, cap: 44, box: 60, stretch: true, compartments: 3, color: COLORS[0] };
+try { Object.assign(st, JSON.parse(localStorage.getItem('alfred-penholder-v3') || '{}')); } catch (e) {}
+const save = () => { try { localStorage.setItem('alfred-penholder-v3', JSON.stringify(st)); } catch (e) {} };
 
 // ---------- controls ----------
-$('name').value = st.name; $('cap').value = st.cap;
-const syncCaps = () => $('caps').setAttribute('aria-pressed', st.caps);
+$('name').value = st.name; $('cap').value = st.cap; $('box').value = st.box;
+const syncCaps = () => { $('caps').setAttribute('aria-pressed', st.caps); $('stretch').setAttribute('aria-pressed', st.stretch); };
 [1, 2, 3, 4].forEach((n) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = n; b.dataset.n = n; $('comps').appendChild(b);
   b.addEventListener('click', () => { st.compartments = n; syncComps(); schedule(0); }); });
 const syncComps = () => $('comps').querySelectorAll('.chip').forEach((b) => b.setAttribute('aria-pressed', +b.dataset.n === st.compartments));
 COLORS.forEach((c) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'sw'; b.style.background = c; b.setAttribute('aria-label', 'Preview colour ' + c); b.dataset.c = c; $('colors').appendChild(b);
   b.addEventListener('click', () => { st.color = c; syncColors(); if (mat) mat.color.set(c); save(); }); });
 const syncColors = () => $('colors').querySelectorAll('.sw').forEach((b) => b.setAttribute('aria-pressed', b.dataset.c === st.color));
-const syncCap = () => { $('capOut').textContent = (st.cap / 10).toFixed(1) + ' cm'; };
+const syncCap = () => { $('capOut').textContent = (st.cap / 10).toFixed(1) + ' cm'; $('boxOut').textContent = (st.box / 10).toFixed(1) + ' cm'; };
 $('name').addEventListener('input', (e) => { st.name = e.target.value; schedule(); });
 $('caps').addEventListener('click', () => { st.caps = !st.caps; syncCaps(); schedule(0); });
+$('stretch').addEventListener('click', () => { st.stretch = !st.stretch; syncCaps(); schedule(0); });
 $('cap').addEventListener('input', (e) => { st.cap = +e.target.value; syncCap(); schedule(200); });
+$('box').addEventListener('input', (e) => { st.box = +e.target.value; syncCap(); schedule(200); });
 $('form').addEventListener('submit', (e) => e.preventDefault());
 syncCaps(); syncComps(); syncColors(); syncCap();
 
@@ -1406,12 +1416,13 @@ function rebuild() {
   if (missing.length) msgs.push('These characters are not in the font and were left out: ' + [...new Set(missing)].join(' '));
   try {
     if (model) model.solid.delete();
-    model = build(W, font, { name: t, cap: st.cap, compartments: st.compartments });
+    model = build(W, font, { name: t, cap: st.cap, minBox: st.box, stretch: st.stretch, compartments: st.compartments });
     if (!model) throw new Error('empty');
     show(meshArrays(model.solid));
     const i = model.info;
     $('dims').textContent = `${(i.length / 10).toFixed(1)} x ${(i.depth / 10).toFixed(1)} x ${(i.height / 10).toFixed(1)} cm`;
-    if (i.shrunk) msgs.push(`Long name: the letters were made ${(i.cap / 10).toFixed(1)} cm tall so the piece fits the A1 bed.`);
+    if (i.shrunk) msgs.push(i.stretched ? `Long name: the letters were made narrower so the piece fits the A1 bed.` : `Long name: the letters were made ${(i.cap / 10).toFixed(1)} cm tall so the piece fits the A1 bed.`);
+    if (i.stretched) $('dims').textContent += `, letters ${(i.letterH / 10).toFixed(1)} cm`;
     $('dl').disabled = false;
   } catch (err) { console.error(err); msgs.push('Something went wrong while building this name. Try removing unusual characters.'); $('dl').disabled = true; }
   $('warn').hidden = !msgs.length; $('warn').textContent = msgs.join(' ');
